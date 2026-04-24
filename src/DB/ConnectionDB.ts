@@ -1,13 +1,20 @@
-import mongoose from "mongoose";
-import { MONGO_URI } from "../config/config.service";
+import mongoose from 'mongoose'
+import { MONGO_URI } from '../config/config.service'
 
 const connectDb = async () => {
-  try {
-    await mongoose.connect(MONGO_URI!);
-    console.log(`DB connected successfully ✅`);
-  } catch (err) {
-    console.log(`Fail to connect DB ❌`, err);
-    process.exit(1); 
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI is not configured')
   }
-};
-export default connectDb;
+
+  try {
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 5000,
+    })
+    console.log('DB connected successfully')
+  } catch (error) {
+    console.error('Failed to connect to MongoDB', error)
+    throw error
+  }
+}
+
+export default connectDb

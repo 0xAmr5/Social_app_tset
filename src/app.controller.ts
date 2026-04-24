@@ -1,10 +1,10 @@
-import express, { NextFunction, Request, Response } from 'express'
 import cors from 'cors'
-import helmet from 'helmet'
+import express, { NextFunction, Request, Response } from 'express'
 import { rateLimit } from 'express-rate-limit'
+import helmet from 'helmet'
+import { appError, globalErrorHandler } from './common/utils/global-error-handler'
 import { connectRedis } from './common/utils/redis.service'
-import { appError,   globalErrorHandler } from './common/utils/global-error-handler'  
-import { PORT } from './config/config.service'  
+import { PORT } from './config/config.service'
 import connectDb from './DB/ConnectionDB'
 import authRouter from './modules/auth/auth.controller'
 
@@ -12,7 +12,8 @@ const app = express()
 
 const bootstrap = async () => {
   await connectDb()
-connectRedis().catch(err => console.log("Redis skipped")); // من غير await
+  connectRedis().catch(() => console.log('Redis skipped'))
+
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
@@ -33,17 +34,18 @@ connectRedis().catch(err => console.log("Redis skipped")); // من غير await
     res.json({ message: 'Welcome to the Social Media App' })
   })
 
-app.use((req: Request, res: Response, next: NextFunction) => {
-    next(new appError(`URL ${req.originalUrl} not found 🔴`, 404));
-});
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    next(new appError(`URL ${req.originalUrl} not found`, 404))
+  })
 
   app.use(globalErrorHandler)
 
   app.listen(PORT, () => {
-    console.log(`🚀 Server is firing on port ${PORT}`)
-    console.log(`🌐 Test it here: http://localhost:${PORT}`)
+    console.log(`Server is running on port ${PORT}`)
+    console.log(`Test it here: http://localhost:${PORT}`)
   })
 }
 
-console.log("Current Port from Config:", PORT);
+console.log('Current port from config:', PORT)
+
 export default bootstrap

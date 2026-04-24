@@ -1,62 +1,67 @@
 import { NextFunction, Request, Response } from 'express'
-import { HydratedDocument } from 'mongoose'
 import jwt from 'jsonwebtoken'
-import { GenderEnum } from '../../common/enum/user.enum.js'
-import { JWT_EXPIRES_IN, JWT_SECRET } from '../../config/config.service'
+import { OAuth2Client, TokenPayload } from 'google-auth-library'
+import { randomBytes } from 'node:crypto'
+import { HydratedDocument } from 'mongoose'
 import { appError } from '../../common/utils/global-error-handler'
+import { GenderEnum, ProviderEnum } from '../../common/enum/user.enum.js'
+import { otpEmailTemplate } from '../../common/utils/email/email.template.js'
+import { generateOtp, sendEmail } from '../../common/utils/email/send.email.js'
 import { compareHash, generateHash } from '../../common/utils/security/hash.js'
+import { JWT_EXPIRES_IN, JWT_SECRET } from '../../config/config.service'
+
 import UserModel, { IUser } from '../../DB/models/user.model'
 import userRepository from '../../DB/repositories/user.repository.js'
 import { SigninRequestBody, SignupRequestBody } from './auth.dto'
-import { generateOtp, sendEmail } from '../../common/utils/email/send.email.js'
-import { otpEmailTemplate } from '../../common/utils/email/email.template.js'
-import { OAuth2Client } from 'google-auth-library';
+
+type GoogleAuthRequestBody = {
+  idToken?: string
+}
+
 class AuthService {
-  private readonly _userModel = new userRepository()
-  private readonly client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+  private readonly userModel = new userRepository()
+  private readonly googleClientId = process.env.GOOGLE_CLIENT_ID ?? ''
+  private readonly googleClient = new OAuth2Client(this.googleClientId || undefined)
 
+  private sanitizeUser(user: IUser | HydratedDocument<IUser>) {
+    const userObject = user.toObject ? user.toObject() : user
+    const { password: _password, ...safeUser } = userObject
+    return safeUser
+  }
 
+  private createToken(user: IUser | HydratedDocument<IUser>) {
+    return jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN },
+    )
+  }
 
-//login with gmail
-    loginWithGmail = async (req: Request, res: Response, next: NextFunction) => {
-        const { idToken } = req.body;
-        
-        const ticket = await this.client.verifyIdToken({ 
-            idToken, 
-            audience: process.env.GOOGLE_CLIENT_ID!,
-        });
-        
-        const payload = ticket.getPayload();
-        if (!payload) return next(new appError("Invalid Google Token 🔴", 400));  
+  private async verifyGoogleToken(idToken: string): Promise<TokenPayload> {
+    if (!this.googleClientId) {
+      throw new appError('Google login is not configured correctly', 400)
+    }
 
-        const { email, given_name, family_name } = payload;
+    const ticket = await this.googleClient.verifyIdToken({
+      idToken,
+      audience: this.googleClientId,
+    })
 
-        let user = await this._userModel.findOne({ filter: { email: email as string } });  
-        if (!user) {
-            user = await this._userModel.create({
-                email,
-                firstName: given_name as string,
-                lastName: family_name as string,
-                password: await generateHash(Math.random().toString()),
-                confirmed: true,
-                provider: 'google'
-            } as Partial<IUser>);
-        }
+    const payload = ticket.getPayload()
+    if (!payload?.email) {
+      throw new appError('Invalid Google token', 400)
+    }
 
-        const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
-        res.status(200).json({ message: "Google Login Success ✅", token });
-    };
-
-
-//signup
+    return payload
+  }
 
   signup = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { name, email, password }: SignupRequestBody = req.body
 
-      await this._userModel.isEmailExists(email)
+      await this.userModel.isEmailExists(email)
 
-      const user: HydratedDocument<IUser> = await this._userModel.create({
+      const user = await this.userModel.create({
         userName: name,
         email,
         password,
@@ -66,23 +71,20 @@ class AuthService {
         gender: GenderEnum.Other,
       } as Partial<IUser>)
 
-      const userObject = user.toObject()
-      const { password: _password, ...safeUser } = userObject
-
-      res.status(200).json({ message: 'Signup successful', user: safeUser })
+      res.status(201).json({
+        message: 'Signup successful',
+        user: this.sanitizeUser(user),
+      })
     } catch (error) {
       next(error)
     }
   }
 
-
-//signin
-
   signin = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password }: SigninRequestBody = req.body
 
-      const user = await this._userModel.findOne({
+      const user = await this.userModel.findOne({
         filter: { email },
         projection: '+password',
       })
@@ -100,22 +102,82 @@ class AuthService {
         return next(new appError('Invalid email or password', 401))
       }
 
-      const token = jwt.sign(
-        { id: user._id, email: user.email, role: user.role },
-        JWT_SECRET,
-        { expiresIn: JWT_EXPIRES_IN },
-      )
-
       res.status(200).json({
         message: 'Logged in successfully',
-        token,
+        token: this.createToken(user),
       })
     } catch (error) {
       next(error)
     }
   }
 
-//confirm email
+  loginWithGmail = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { idToken } = req.body as GoogleAuthRequestBody
+      if (!idToken) {
+        return next(new appError('Google token is required', 400))
+      }
+
+      const payload = await this.verifyGoogleToken(idToken)
+      const email = payload.email as string
+      const displayName =
+        payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
+
+      let user = await this.userModel.findOne({ filter: { email } })
+      if (!user) {
+        user = await this.userModel.create({
+          email,
+          userName: displayName || email.split('@')[0],
+          password: randomBytes(32).toString('hex'),
+          isConfirmed: true,
+          provider: ProviderEnum.Google,
+        } as Partial<IUser>)
+      }
+
+      res.status(200).json({
+        message: 'Google login success',
+        token: this.createToken(user),
+        user: this.sanitizeUser(user),
+      })
+    } catch (error) {
+      next(error)
+    }
+  }
+
+  signUpWithGmail = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { idToken } = req.body as GoogleAuthRequestBody
+      if (!idToken) {
+        return next(new appError('Google token is required', 400))
+      }
+
+      const payload = await this.verifyGoogleToken(idToken)
+      const email = payload.email as string
+      const userName =
+        payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
+
+      let user = await this.userModel.findOne({ filter: { email } })
+
+      if (!user) {
+        user = await this.userModel.create({
+          userName: userName || email.split('@')[0],
+          email,
+          password: randomBytes(32).toString('hex'),
+          isConfirmed: payload.email_verified ?? true,
+          provider: ProviderEnum.Google,
+        } as Partial<IUser>)
+      } else if (user.provider === ProviderEnum.Local) {
+        return next(new appError('This email is already registered with local authentication', 409))
+      }
+
+      res.status(200).json({
+        message: 'Google signup successful',
+        user: this.sanitizeUser(user),
+      })
+    } catch (error) {
+      next(error)
+    }
+  }
 
   confirmEmail = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -146,8 +208,6 @@ class AuthService {
       next(error)
     }
   }
-
-//update password
 
   updatePassword = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -187,49 +247,62 @@ class AuthService {
     res.status(200).json({ message: 'Logged out successfully' })
   }
 
-  //forget password
-
   forgetPassword = async (req: Request, res: Response, next: NextFunction) => {
-    const { email } = req.body;
-    const user = await this._userModel.findOne({ filter: { email } });
-    if (!user) return next(new appError("User not found 🔴", 404));
-    const otp = await generateOtp(); 
-    
-    await sendEmail({
+    try {
+      const { email } = req.body as { email?: string }
+      if (!email) {
+        return next(new appError('Email is required', 400))
+      }
+
+      const user = await this.userModel.findOne({ filter: { email } })
+      if (!user) {
+        return next(new appError('User not found', 404))
+      }
+
+      const otp = generateOtp()
+
+      await sendEmail({
         to: email,
-        subject: "Reset Password OTP 🔐",
-        html: otpEmailTemplate({ otp })
-    });
+        subject: 'Reset Password OTP',
+        html: otpEmailTemplate({ otp }),
+      })
 
-    res.status(200).json({ message: "OTP sent to your email ✅" });
-};
-
-//reset password
-
-resetPassword = async (req: Request, res: Response, next: NextFunction) => {
-    const { email, otp, newPassword } = req.body;
-    const user = await this._userModel.findOne({ filter: { email } });
-    
-    if (!user) {
-        return next(new appError("User not found 🔴", 404));
+      res.status(200).json({ message: 'OTP sent to your email' })
+    } catch (error) {
+      next(error)
     }
-    
-    if (otp !== "123456") return next(new appError("Invalid OTP 🔴", 400))  
-    user.password = await generateHash(newPassword);
-    await user.save();
+  }
 
-    res.status(200).json({ message: "Password reset successfully ✅" });
-};  
+  resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, otp, newPassword } = req.body as {
+        email?: string
+        otp?: string
+        newPassword?: string
+      }
 
+      if (!email || !otp || !newPassword) {
+        return next(new appError('Email, OTP and new password are required', 400))
+      }
 
+      const user = await UserModel.findOne({ email }).select('+password').exec()
+      if (!user) {
+        return next(new appError('User not found', 404))
+      }
 
+      if (otp !== '123456') {
+        return next(new appError('Invalid OTP', 400))
+      }
 
+      user.password = await generateHash(newPassword)
+      await user.save()
 
+      res.status(200).json({ message: 'Password reset successfully' })
+    } catch (error) {
+      next(error)
+    }
+  }
 }
-
-
-  
-
 
 const authService = new AuthService()
 

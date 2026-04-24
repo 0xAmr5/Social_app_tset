@@ -32,6 +32,7 @@ export const authentication = async (req: Request, res: Response, next: NextFunc
     }
 
     req.user = user
+    req.decoded = decoded
     next()
   } catch {
     next(new appError('Authentication failed', 401))
