@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
-import { emailEnum } from "../../enum/email.enum";export const eventEmitter = new EventEmitter();
+import mailEnum from "../../enum/mail.enum";
 
-eventEmitter.on(emailEnum.confirmEmail, async (fn) => {
-    await fn();
+export const eventEmitter = new EventEmitter();
+
+eventEmitter.on(mailEnum.sendMail, (fn: Function) => {
+  return fn();
 });

@@ -1,18 +1,31 @@
-import { Router } from 'express'
-import { authentication } from '../../common/middleware/auth.middleware'
-import { Validation } from '../../common/middleware/validation'
-import AuthService from './auth.service'
-import * as authValidation from './auth.valivation'
+import auth from "./auth.service.js";
+import { Router } from "express";
+import { signUpSchema, signInSchema, confirmSignUpSchema, forgetPassword, resetPassowrd } from "./auth.validationSchema.js";
+import { validationMiddleWare } from "../../common/middleware/validation.js";
+import { authenticate } from "../../common/middleware/authenticate.js";
 
-const authRouter = Router()
+export const authRouter: Router = Router();
 
-authRouter.post('/signup', Validation(authValidation.signUpSchema), AuthService.signup)
-authRouter.post('/signin', Validation(authValidation.signInSchema), AuthService.signin)
-authRouter.post('/google', AuthService.loginWithGmail)
-authRouter.patch('/confirm-email', AuthService.confirmEmail)
-authRouter.patch('/forget-password', AuthService.forgetPassword)
-authRouter.patch('/reset-password', AuthService.resetPassword)
-authRouter.patch('/update-password', authentication, AuthService.updatePassword)
-authRouter.post('/logout', authentication, AuthService.logout)
+authRouter.post("/sign-up", validationMiddleWare(signUpSchema), auth.signUp);
+authRouter.post(
+  "/confirm-sign-up",
+  validationMiddleWare(confirmSignUpSchema),
+  auth.confirmMail,
+);
+authRouter.post("/log-in", validationMiddleWare(signInSchema), auth.logIn);
+authRouter.post('/resend-otp',auth.reSendOtp)
+authRouter.post("/sign-with-google", auth.signUpAndLoginWithGmail);
+authRouter.post("/get-profile",authenticate, auth.getProfile);
+authRouter.put(
+  "/forget-password",
+  validationMiddleWare(forgetPassword),
+  auth.forgetPassword,
+);
 
-export default authRouter
+authRouter.patch(
+  "/reset-password",
+  validationMiddleWare(resetPassowrd),
+  auth.resetPassowrd,
+);
+
+export default authRouter;

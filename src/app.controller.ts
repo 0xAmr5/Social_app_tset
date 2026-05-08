@@ -7,6 +7,11 @@ import { connectRedis } from './common/utils/redis.service'
 import { PORT } from './config/config.service'
 import connectDb from './DB/ConnectionDB'
 import authRouter from './modules/auth/auth.controller'
+import commentRouter from './modules/comments/comment.controller'
+import notificationRouter from './modules/notifications/notification.controller'
+import storyRouter from './modules/stories/story.controller'
+import postController from './DB/models/posts/post.controller'
+import { userRouter } from './DB/models/user/user.controller'
 
 const app = express()
 
@@ -29,6 +34,11 @@ const bootstrap = async () => {
   app.use(limiter)
   app.use(express.json())
   app.use('/auth', authRouter)
+  app.use('/users', userRouter)
+  app.use('/posts', postController)
+  app.use('/comments', commentRouter)
+  app.use('/notifications', notificationRouter)
+  app.use('/stories', storyRouter)
 
   app.get('/', (_req: Request, res: Response) => {
     res.json({ message: 'Welcome to the Social Media App' })

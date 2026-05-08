@@ -6,6 +6,10 @@ declare global {
     interface Request {
       user?: IUser | null
       decoded?: JwtPayload
+      token?: string
+      tokenDecoded?: JwtPayload
+      file?: Multer.File
+      files?: Multer.File[] | { [fieldname: string]: Multer.File[] }
     }
   }
 }

@@ -1,15 +1,35 @@
-import dotenv from 'dotenv'
-import path from 'path'
+import { config } from "dotenv";
+import { resolve } from "node:path";
 
-dotenv.config({
-  path: path.resolve(process.cwd(), `.env.${process.env.NODE_ENV || 'development'}`),
-})
+const NODE_ENV = process.env.NODE_ENV;
 
-export const MONGO_URI = process.env.MONGO_URI ?? ''
-export const PORT = Number(process.env.PORT ?? 3000)
-export const EMAIL = process.env.EMAIL ?? ''
-export const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD ?? ''
-export const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? 'Social App'
-export const JWT_SECRET = process.env.JWT_SECRET ?? 'social_media_secret_key'
-export const JWT_EXPIRES_IN = '1d'
-export const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'
+config({ path: resolve(`.env.${NODE_ENV}`) });
+
+export const PORT = Number(process.env.PORT);
+export const HOST = process.env.HOST;
+export const DB_URI = process.env.DB_URI as string;
+export const MONGO_URI = (process.env.MONGO_URI || process.env.DB_URI) as string;
+export const DB_NAME = process.env.DB_NAME as string;
+export const HASH_SALT = Number(process.env.HASH_SALT);
+export const ENCRYPTION_ALGORITM = process.env.ENCRYPTION_ALGORITM as string;
+export const CIPHER_IV_SIZE = Number(process.env.CIPHER_IV_SIZE);
+export const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY as string;
+export const MAIL_APP_PASSWORD = process.env.MAIL_APP_PASSWORD as string;
+export const MAIL_APP_SENDER = process.env.MAIL_APP_SENDER as string;
+export const EMAIL = MAIL_APP_SENDER;
+export const EMAIL_PASSWORD = MAIL_APP_PASSWORD;
+export const EMAIL_FROM_NAME = (process.env.EMAIL_FROM_NAME || "Social App") as string;
+export const SECRET_ADMIN_ACCESS_TOKEN = process.env.SECRET_ADMIN_ACCESS_TOKEN as string;
+export const SECRET_USER_ACCESS_TOKEN = process.env.SECRET_USER_ACCESS_TOKEN as string;
+export const JWT_SECRET = (process.env.JWT_SECRET || SECRET_USER_ACCESS_TOKEN || SECRET_ADMIN_ACCESS_TOKEN) as string;
+export const SECRET_USER_REFRESH_TOKEN = process.env.SECRET__USER_REFRESH_TOKEN as string;
+export const SECRET_ADMIN_REFRESH_TOKEN = process.env.SECRET_ADMIN_REFRESH_TOKEN as string;
+export const O2AUTH_CLIENT_ID = process.env.O2AUTH_CLIENT_ID as string;
+export const REDIS_CLIENT = process.env.REDIS_CLIENT as string;
+export const TOKEN_ADMIN_PREFIX = process.env.TOKEN_ADMIN_PREFIX as string;
+export const TOKEN_USER_PREFIX = process.env.TOKEN_USER_PREFIX as string;
+export const AWS_REGION = process.env.AWS_REGION as string;
+export const AWS_ACCESS_KEY = process.env.ACCESS_KEY as string;
+export const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY as string;
+export const AWS_S3_BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME as string;
+export const APPLICATION_NAME = process.env.APPLICATION_NAME as string;

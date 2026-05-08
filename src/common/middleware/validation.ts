@@ -1,25 +1,39 @@
-import { NextFunction, Request, Response } from 'express'
-import { ZodType } from 'zod'
-import { appError } from '../../common/utils/global-error-handler';
-type reqType = keyof Request
-type schemaType = Partial<Record<reqType, ZodType>>
+import type { Request, Response, NextFunction } from "express";
+import { safeParseAsync, z } from "zod";
+import { appError } from "../utils/global-error-handler";
 
-export const Validation = (schema: schemaType) => {
+type reqType = keyof Request;
+export type schemaType = Partial<Record<reqType, z.ZodSchema>>;
+
+export const validationMiddleWare = (schema: schemaType) => {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const errorValidation = []
-
+    const arrOfError = [];
     for (const key of Object.keys(schema) as reqType[]) {
-      if (!schema[key]) continue
-      const result = await schema[key]!.safeParseAsync(req[key])
+      if (!req[key]) continue;
 
-      if (!result?.success) {
-        errorValidation.push(result.error.message)
+      if (req?.file) {
+        req.body.attachment = req.file;
+      }
+      if (req?.files) {
+        req.body.attachments = req.files;
+      }
+
+      const result = (await schema[key]?.safeParseAsync(req[key])) as {
+        success: boolean;
+        error: any;
+      };
+      if (!result.success) {
+        arrOfError.push(result?.error.message);
       }
     }
 
-    if (errorValidation.length) {
-      throw new appError(JSON.parse(errorValidation as unknown as string), 400)
+    if (arrOfError.length > 0) {
+      throw new appError(
+        "validation error",
+        JSON.parse(arrOfError as unknown as string),
+        400
+      );
     }
-    next()
-  }
-}
+    next();
+  };
+};

@@ -1,309 +1,269 @@
-import { NextFunction, Request, Response } from 'express'
-import jwt from 'jsonwebtoken'
-import { OAuth2Client, TokenPayload } from 'google-auth-library'
-import { randomBytes } from 'node:crypto'
-import { HydratedDocument } from 'mongoose'
-import { appError } from '../../common/utils/global-error-handler'
-import { GenderEnum, ProviderEnum } from '../../common/enum/user.enum.js'
-import { otpEmailTemplate } from '../../common/utils/email/email.template.js'
-import { generateOtp, sendEmail } from '../../common/utils/email/send.email.js'
-import { compareHash, generateHash } from '../../common/utils/security/hash.js'
-import { JWT_EXPIRES_IN, JWT_SECRET } from '../../config/config.service'
+import type { Request, Response, NextFunction } from "express";
+import { IUser } from "../../DB/models/user.model.js";
 
-import UserModel, { IUser } from '../../DB/models/user.model'
-import userRepository from '../../DB/repositories/user.repository.js'
-import { SigninRequestBody, SignupRequestBody } from './auth.dto'
+import {
+  ErrorConflict,
+  Errorforbidden,
+  ErrorInteralServerError,
+  ErrorUnAuthorizedRequest,
+  SuccessResponse,
+} from "../../common/utils/global-error-handler";
+import { _QueryFilter, HydratedDocument } from "mongoose";
+import userRepo from "../../DB/repo/user.repo.js";
+import { GlobalCompare, Globalhash } from "../../common/security/hash.js";
+import { Globaldecrypt, Globalencrypt } from "../../common/security/encrypt.js";
+import { sendEmail } from "../../common/utils/email/send.email";
+import mailEnum from "../../common/enum/mail.enum.js";
+import { genrateOtp } from "../../common/utils/email/nodeMailer.js";
+import { generateTokens } from "./services.helpers.js";
+import redisServices from "../../common/services/redis.services.js";
+import { O2AUTH_CLIENT_ID } from "../../config/config.services.js";
+import { LoginTicket, OAuth2Client, TokenPayload } from "google-auth-library";
+import providerEnum from "../../common/enum/provider.enum.js";
+import fireBaseServices from "../../common/services/fireBase.services.js";
+import cacheKeyEnum from "../../common/enum/cacheKey.enum.js";
+class auth {
+  private readonly _userModel = userRepo;
+  private readonly _fireBase = fireBaseServices;
+    private readonly _redisServices = redisServices;
+  
 
-type GoogleAuthRequestBody = {
-  idToken?: string
-}
+  constructor() {}
 
-class AuthService {
-  private readonly userModel = new userRepository()
-  private readonly googleClientId = process.env.GOOGLE_CLIENT_ID ?? ''
-  private readonly googleClient = new OAuth2Client(this.googleClientId || undefined)
-
-  private sanitizeUser(user: IUser | HydratedDocument<IUser>) {
-    const userObject = user.toObject ? user.toObject() : user
-    const { password: _password, ...safeUser } = userObject
-    return safeUser
-  }
-
-  private createToken(user: IUser | HydratedDocument<IUser>) {
-    return jwt.sign(
-      { id: user._id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN },
-    )
-  }
-
-  private async verifyGoogleToken(idToken: string): Promise<TokenPayload> {
-    if (!this.googleClientId) {
-      throw new appError('Google login is not configured correctly', 400)
+  signUp = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { userName, email, password, phone, gender } = req.body;
+    const emailExists: HydratedDocument<IUser> | null =
+      await this._userModel.userEmailExists({ email });
+    if (emailExists) {
+      ErrorConflict("email already exists");
     }
 
-    const ticket = await this.googleClient.verifyIdToken({
+    const user: HydratedDocument<IUser> = await this._userModel.create({
+      userName,
+      email,
+      password: Globalhash({ plainText: password }),
+      phone: phone ? Globalencrypt({ plainText: phone }) : null,
+      gender,
+    } as Partial<IUser>);
+
+    await sendEmail({
+      to: email,
+      subject: mailEnum.consrimSingUp,
+      html: `Your OTP code is: ${genrateOtp()}`,
+    });
+
+    SuccessResponse({ res, data: "please confirm your email" });
+  };
+
+  logIn = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { email, password , fcm } = req.body;
+    const emailExists: HydratedDocument<IUser> | null =
+      await this._userModel.userEmailExists({ email, confirmed: true });
+    if (!emailExists) {
+      ErrorConflict("email doesn't exists");
+    }
+    if (!emailExists) ErrorConflict("email does not exists or confirmed");
+    if (
+      !GlobalCompare({ plainText: password, hashText: emailExists!.password })
+    ) {
+      Errorforbidden("wrong password");
+    }
+
+    await redisServices.addSet({
+      filter : email,
+      subject : cacheKeyEnum.fcm
+    },fcm)
+
+    const { accessToken, refreshToken } = generateTokens(
+      emailExists as HydratedDocument<IUser>,
+    );
+
+    SuccessResponse({ res, data: { accessToken, refreshToken } });
+  };
+
+  confirmMail = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { email, otp } = req.body;
+    const emailExists: HydratedDocument<IUser> | null =
+      await this._userModel.userEmailExists({ email });
+    if (emailExists) {
+      ErrorConflict("email doesn't exists");
+    }
+    if (emailExists?.confirmed == true)
+      ErrorConflict("your email is already confirmed");
+
+    const CachedOtp: string | void = await this._redisServices.getKey({
+      key: this._redisServices.cacheKey({
+        filter: email,
+        subject: mailEnum.consrimSingUp,
+      }),
+    });
+    if (!GlobalCompare({ plainText: otp, hashText: CachedOtp as string }))
+      Errorforbidden("wrong otp code");
+
+    await this._redisServices.deleteKey({
+      key: this._redisServices.cacheKey({
+        filter: email,
+        subject: mailEnum.consrimSingUp,
+      }),
+    });
+
+    await this._userModel.findOneAndUpdate({
+      filter: { email },
+      update: { confirmed: true },
+    });
+
+    SuccessResponse({ res, data: "email confirmed" });
+  };
+
+  signUpAndLoginWithGmail = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { idToken } = req.body;
+
+    const Client = new OAuth2Client(O2AUTH_CLIENT_ID);
+
+    const verifyIdToken: Promise<LoginTicket> = Client.verifyIdToken({
       idToken,
-      audience: this.googleClientId,
-    })
+      audience: O2AUTH_CLIENT_ID,
+    });
 
-    const payload = ticket.getPayload()
-    if (!payload?.email) {
-      throw new appError('Invalid Google token', 400)
-    }
+    const payload: TokenPayload | undefined = (
+      await verifyIdToken
+    ).getPayload();
 
-    return payload
-  }
+    if (!payload) ErrorInteralServerError("invalid token id");
+    const { name, email, email_verified, picture }: any = payload;
 
-  signup = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { name, email, password }: SignupRequestBody = req.body
-
-      await this.userModel.isEmailExists(email)
-
-      const user = await this.userModel.create({
+    let emailExists: HydratedDocument<IUser> | null =
+      await this._userModel.userEmailExists({ email });
+    if (!emailExists) {
+      emailExists = await this._userModel.create({
         userName: name,
         email,
-        password,
-        phone: '',
-        address: '',
-        age: 0,
-        gender: GenderEnum.Other,
-      } as Partial<IUser>)
-
-      res.status(201).json({
-        message: 'Signup successful',
-        user: this.sanitizeUser(user),
-      })
-    } catch (error) {
-      next(error)
+        provider: providerEnum.google,
+        confirmed: email_verified,
+      } as Partial<IUser>);
     }
-  }
 
-  signin = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email, password }: SigninRequestBody = req.body
+    if (emailExists?.provider == providerEnum.system)
+      ErrorConflict("please login throw system");
 
-      const user = await this.userModel.findOne({
-        filter: { email },
-        projection: '+password',
-      })
+    const { accessToken, refreshToken } = generateTokens(emailExists);
 
-      if (!user) {
-        return next(new appError('Invalid email or password', 401))
-      }
+    SuccessResponse({ res, data: { accessToken, refreshToken } });
+  };
 
-      if (!user.isConfirmed) {
-        return next(new appError('Please confirm your email first', 403))
-      }
+  getProfile = (req: Request, res: Response, next: NextFunction) => {
+    SuccessResponse({
+      res,
+      data: {
+        userName: req.user?.userName,
+        email: req.user?.email,
+        age: req.user?.age,
+        gender: req.user?.gender,
+        phone: Globaldecrypt({ cipherText: req.user?.phone! }),
+      },
+    });
+  };
 
-      const isPasswordCorrect = await compareHash(password, user.password)
-      if (!isPasswordCorrect) {
-        return next(new appError('Invalid email or password', 401))
-      }
+  reSendOtp = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { email } = req.body;
 
-      res.status(200).json({
-        message: 'Logged in successfully',
-        token: this.createToken(user),
-      })
-    } catch (error) {
-      next(error)
+    const user = await this._userModel.findOne({ filter: email! });
+    if (!user) {
+      ErrorConflict("user does not exists");
     }
-  }
 
-  loginWithGmail = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { idToken } = req.body as GoogleAuthRequestBody
-      if (!idToken) {
-        return next(new appError('Google token is required', 400))
-      }
+    await sendEmail({
+      to: email,
+      subject: mailEnum.reSendOtp,
+      html: `Your OTP code is: ${genrateOtp()}`,
+    });
 
-      const payload = await this.verifyGoogleToken(idToken)
-      const email = payload.email as string
-      const displayName =
-        payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
-
-      let user = await this.userModel.findOne({ filter: { email } })
-      if (!user) {
-        user = await this.userModel.create({
-          email,
-          userName: displayName || email.split('@')[0],
-          password: randomBytes(32).toString('hex'),
-          isConfirmed: true,
-          provider: ProviderEnum.Google,
-        } as Partial<IUser>)
-      }
-
-      res.status(200).json({
-        message: 'Google login success',
-        token: this.createToken(user),
-        user: this.sanitizeUser(user),
-      })
-    } catch (error) {
-      next(error)
-    }
-  }
-
-  signUpWithGmail = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { idToken } = req.body as GoogleAuthRequestBody
-      if (!idToken) {
-        return next(new appError('Google token is required', 400))
-      }
-
-      const payload = await this.verifyGoogleToken(idToken)
-      const email = payload.email as string
-      const userName =
-        payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
-
-      let user = await this.userModel.findOne({ filter: { email } })
-
-      if (!user) {
-        user = await this.userModel.create({
-          userName: userName || email.split('@')[0],
-          email,
-          password: randomBytes(32).toString('hex'),
-          isConfirmed: payload.email_verified ?? true,
-          provider: ProviderEnum.Google,
-        } as Partial<IUser>)
-      } else if (user.provider === ProviderEnum.Local) {
-        return next(new appError('This email is already registered with local authentication', 409))
-      }
-
-      res.status(200).json({
-        message: 'Google signup successful',
-        user: this.sanitizeUser(user),
-      })
-    } catch (error) {
-      next(error)
-    }
-  }
-
-  confirmEmail = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email, otp } = req.body as { email?: string; otp?: string }
-
-      if (!email || !otp) {
-        return next(new appError('Email and OTP are required', 400))
-      }
-
-      const user = await UserModel.findOne({ email }).exec()
-      if (!user) {
-        return next(new appError('User not found', 404))
-      }
-
-      if (user.isConfirmed) {
-        return next(new appError('Email already confirmed', 400))
-      }
-
-      if (otp !== '123456') {
-        return next(new appError('Invalid OTP', 400))
-      }
-
-      user.isConfirmed = true
-      await user.save()
-
-      res.status(200).json({ message: 'Email confirmed successfully' })
-    } catch (error) {
-      next(error)
-    }
-  }
-
-  updatePassword = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { oldPassword, newPassword } = req.body as {
-        oldPassword?: string
-        newPassword?: string
-      }
-
-      if (!req.user?._id) {
-        return next(new appError('Authentication required', 401))
-      }
-
-      if (!oldPassword || !newPassword) {
-        return next(new appError('Old password and new password are required', 400))
-      }
-
-      const user = await UserModel.findById(req.user._id).select('+password').exec()
-      if (!user) {
-        return next(new appError('User not found', 404))
-      }
-
-      const isMatch = await compareHash(oldPassword, user.password)
-      if (!isMatch) {
-        return next(new appError('Old password is incorrect', 400))
-      }
-
-      user.password = await generateHash(newPassword)
-      await user.save()
-
-      res.status(200).json({ message: 'Password updated successfully' })
-    } catch (error) {
-      next(error)
-    }
-  }
-
-  logout = async (_req: Request, res: Response, _next: NextFunction) => {
-    res.status(200).json({ message: 'Logged out successfully' })
-  }
+    SuccessResponse({ res, data: "otp send please confirm your mail" });
+  };
 
   forgetPassword = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email } = req.body as { email?: string }
-      if (!email) {
-        return next(new appError('Email is required', 400))
-      }
-
-      const user = await this.userModel.findOne({ filter: { email } })
-      if (!user) {
-        return next(new appError('User not found', 404))
-      }
-
-      const otp = generateOtp()
-
-      await sendEmail({
-        to: email,
-        subject: 'Reset Password OTP',
-        html: otpEmailTemplate({ otp }),
-      })
-
-      res.status(200).json({ message: 'OTP sent to your email' })
-    } catch (error) {
-      next(error)
+    const { email } = req.body;
+    console.log(this._userModel);
+    const userEmailExists: HydratedDocument<IUser> | null =
+      await this._userModel.userEmailExists({ email, confirmed: true });
+    if (!userEmailExists) {
+      ErrorConflict("user does not exists");
     }
-  }
 
-  resetPassword = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email, otp, newPassword } = req.body as {
-        email?: string
-        otp?: string
-        newPassword?: string
-      }
+    await sendEmail({
+      to: email,
+      subject: mailEnum.forgetPassword,
+      html: `Your OTP code is: ${genrateOtp()}`,
+    });
+    SuccessResponse({ res, data: "please confirm your email" });
+  };
 
-      if (!email || !otp || !newPassword) {
-        return next(new appError('Email, OTP and new password are required', 400))
-      }
+  resetPassowrd = async (req: Request, res: Response, next: NextFunction) => {
+    const { email, newPassword, otp } = req.body;
+    const userEmailExists: HydratedDocument<IUser> | null =
+      await this._userModel.userEmailExists({ email, confirmed: true });
 
-      const user = await UserModel.findOne({ email }).select('+password').exec()
-      if (!user) {
-        return next(new appError('User not found', 404))
-      }
-
-      if (otp !== '123456') {
-        return next(new appError('Invalid OTP', 400))
-      }
-
-      user.password = await generateHash(newPassword)
-      await user.save()
-
-      res.status(200).json({ message: 'Password reset successfully' })
-    } catch (error) {
-      next(error)
+    if (!userEmailExists) {
+      ErrorConflict("email does not exists");
     }
-  }
+    const CachedOtp: string = (await this._redisServices.getKey({
+      key: this._redisServices.cacheKey({
+        filter: email,
+        subject: mailEnum.forgetPassword,
+      }),
+    })) as string;
+
+    if (!GlobalCompare({ plainText: otp, hashText: CachedOtp })) {
+      ErrorUnAuthorizedRequest("wrong otp");
+    }
+    await this._redisServices.deleteKey({
+      key: this._redisServices.cacheKey({
+        filter: email,
+        subject: mailEnum.forgetPassword,
+      }),
+    });
+
+    await this._userModel.findOneAndUpdate({
+      filter: { email, confirmed: true },
+      update: {
+        password: Globalhash({ plainText: newPassword }),
+      },
+    });
+
+    SuccessResponse({ res, data: "password updated" });
+  };
+
+  sendNotification = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    const { token } = req.body;
+    const data = { title: "title test", body: "body test" };
+
+    const result = fireBaseServices.sendNotification({ token, data });
+    SuccessResponse({ res, data: result });
+  };
 }
 
-const authService = new AuthService()
-
-export default authService
+export default new auth();
