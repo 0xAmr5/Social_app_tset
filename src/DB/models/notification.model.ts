@@ -31,6 +31,7 @@ notificationSchema.pre(["find", "findOne"], function () {
 });
 
 const notificationModel =
-  mongoose.models.notifications || mongoose.model<INotification>("notifications", notificationSchema);
+  ((mongoose.models.notifications as mongoose.Model<INotification> | undefined) ||
+    mongoose.model<INotification>("notifications", notificationSchema)) as mongoose.Model<any>;
 
 export default notificationModel;

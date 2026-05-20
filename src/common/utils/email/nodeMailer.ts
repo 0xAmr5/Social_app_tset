@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 import {
   MAIL_APP_PASSWORD,
   MAIL_APP_SENDER,
-} from "../../../config/config.services.js";
+} from "../../../config/config.service.js";
 import mailEnum from "../../enum/mail.enum.js";
 import Mail from "nodemailer/lib/mailer/index.js";
 import { sendOtp } from "./email.templetes.js";

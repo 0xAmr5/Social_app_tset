@@ -7,6 +7,10 @@ import { appError } from '../utils/global-error-handler'
 
 type AuthPayload = JwtPayload & {
   id?: string
+  sub?: string
+  email?: string
+  role?: string
+  provider?: string
 }
 
 export const authentication = async (req: Request, res: Response, next: NextFunction) => {
@@ -22,17 +26,24 @@ export const authentication = async (req: Request, res: Response, next: NextFunc
     }
 
     const decoded = jwt.verify(token, JWT_SECRET) as AuthPayload
-    if (!decoded.id) {
+    const userId = decoded.sub ?? decoded.id
+    if (!userId) {
       return next(new appError('Invalid payload', 401))
     }
 
-    const user = await userModel.findById(decoded.id)
+    const user = await userModel.findById(userId)
     if (!user) {
       return next(new appError('User no longer exists', 401))
     }
 
     req.user = user
-    req.decoded = decoded
+    req.decoded = {
+      ...decoded,
+      sub: String(userId),
+      email: String(decoded.email ?? user.email),
+      role: String(decoded.role ?? user.role),
+      provider: String(decoded.provider ?? user.provider),
+    }
     next()
   } catch {
     next(new appError('Authentication failed', 401))

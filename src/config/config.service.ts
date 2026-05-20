@@ -1,11 +1,13 @@
 import { config } from "dotenv";
 import { resolve } from "node:path";
 
-const NODE_ENV = process.env.NODE_ENV;
+const NODE_ENV = process.env.NODE_ENV || "development";
 
 config({ path: resolve(`.env.${NODE_ENV}`) });
 
-export const PORT = Number(process.env.PORT);
+export const ENV = NODE_ENV;
+export const IS_PRODUCTION = NODE_ENV === "production";
+export const PORT = Number(process.env.PORT || 3000);
 export const HOST = process.env.HOST;
 export const DB_URI = process.env.DB_URI as string;
 export const MONGO_URI = (process.env.MONGO_URI || process.env.DB_URI) as string;

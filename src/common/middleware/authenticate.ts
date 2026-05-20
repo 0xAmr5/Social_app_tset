@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { SECRET_ADMIN_ACCESS_TOKEN, SECRET_USER_ACCESS_TOKEN, TOKEN_ADMIN_PREFIX, TOKEN_USER_PREFIX } from "../../config/config.services";
+import { SECRET_ADMIN_ACCESS_TOKEN, SECRET_USER_ACCESS_TOKEN, TOKEN_ADMIN_PREFIX, TOKEN_USER_PREFIX } from "../../config/config.service";
 import { ErrorConflict, Errorforbidden, ErrorUnAuthorizedRequest } from "../utils/global-error-handler";
 import { accessTokenVerify } from "../utils/security/jsonWebTokens";
 import jsonwebtoken from "jsonwebtoken";
@@ -7,8 +7,11 @@ import userRepo from "../../DB/repo/user.repo";
 import { HydratedDocument } from "mongoose";
 import { IUser } from "../../DB/models/user.model";
 import cacheKeyEnum from "../enum/cacheKey.enum";
-import redisServices from "../services/redis.services";
-
+import redisServices from "../service/redis.service";
+import { appError } from "../utils/global-error-handler";
+import redisService from "../service/redis.service";
+import { RoleEnum } from "../enum/user.enum";
+import { JWT_SECRET } from "../../config/config.service";
 
 
   export async function authenticate(req : Request ,res:Response,next : NextFunction){
@@ -51,3 +54,58 @@ import redisServices from "../services/redis.services";
     req.tokenDecoded = verify
     next();
   }
+
+export const graphql_authorization = async (roles: RoleEnum[], role?: string) => {
+  if (!role) {
+    throw new appError('Unauthorized', 401)
+  }
+
+  if (!roles.includes(role as RoleEnum)) {
+    throw new appError('Forbidden', 403)
+  }
+}
+
+
+
+export const graphql_auth = async (authorization?: string) => {
+  if (!authorization?.startsWith('Bearer ')) {
+    throw new appError('Authorization token is required', 401)
+  }
+
+  const [prefix, token] = authorization.split(' ')
+  if (!prefix || !token) {
+    throw new appError('Invalid token format', 401)
+  }
+
+  const decoded = verifyToken(token, prefix)
+
+  if (!decoded.data?.userId) {
+    throw new appError('Invalid token payload', 401)
+  }
+
+  const revokedTokenKey = `revoked_token:${decoded.id}`
+  const isRevoked = await redisService.isExist(revokedTokenKey)
+  if (isRevoked) {
+    throw new appError('Token has been revoked', 401)
+  }
+
+  const user = await userRepo.findById(decoded.data.userId)
+  if (!user) {
+    throw new appError('User not found', 404)
+  }
+
+  return { user, decoded }
+}
+function verifyToken(token: string, prefix: string) {
+  const secret = (function () {
+    if (prefix === TOKEN_USER_PREFIX) {
+      return SECRET_USER_ACCESS_TOKEN
+    }
+    else if (prefix === TOKEN_ADMIN_PREFIX) {
+      return SECRET_ADMIN_ACCESS_TOKEN
+    }
+    throw new appError('Invalid token prefix', 401)
+  })()
+
+  return accessTokenVerify({ token, secret }) as jsonwebtoken.JwtPayload
+}

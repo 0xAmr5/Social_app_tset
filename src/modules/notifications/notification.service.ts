@@ -1,9 +1,28 @@
 import type { Request, Response, NextFunction } from "express";
 import notificationModel from "../../DB/models/notification.model";
 import { ErrorNotFound, SuccessResponse } from "../../common/utils/global-error-handler";
-import fireBaseServices from "../../common/services/fireBase.services";
+import fireBaseServices from "../../common/service/fireBase.services";
 
 class NotificationService {
+  sendNotification = async ({
+    token,
+    data,
+  }: {
+    token: string
+    data: { title: string; body: string }
+  }) => {
+    return await fireBaseServices.sendNotification({ token, data })
+  }
+
+  sendNotifications = async ({ tokens, data }: { tokens: string[]; data?: { title: string; body: string } }) => {
+    if (data) {
+      await Promise.all(tokens.map(token => fireBaseServices.sendNotification({ token, data })))
+      return
+    }
+
+    return await fireBaseServices.sendNotifications({ tokens })
+  }
+
   create = async (req: Request, res: Response, _next: NextFunction) => {
     const notification = await notificationModel.create({
       title: req.body.title,

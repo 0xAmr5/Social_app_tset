@@ -1,6 +1,6 @@
 import jsonwebtoken from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
-import { SECRET_ADMIN_ACCESS_TOKEN, SECRET_ADMIN_REFRESH_TOKEN, SECRET_USER_ACCESS_TOKEN, SECRET_USER_REFRESH_TOKEN } from "../../../config/config.services.js";
+import { SECRET_ADMIN_ACCESS_TOKEN, SECRET_ADMIN_REFRESH_TOKEN, SECRET_USER_ACCESS_TOKEN, SECRET_USER_REFRESH_TOKEN } from "../../../config/config.service.js";
 import { Types } from "mongoose";
 import roleEnum from "../../enum/role.enum.js";
 

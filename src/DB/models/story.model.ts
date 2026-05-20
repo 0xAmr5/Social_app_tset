@@ -38,6 +38,8 @@ storySchema.pre(["find", "findOne"], function () {
   }
 });
 
-const storyModel = mongoose.models.stories || mongoose.model<IStory>("stories", storySchema);
+const storyModel =
+  ((mongoose.models.stories as mongoose.Model<IStory> | undefined) ||
+    mongoose.model<IStory>("stories", storySchema)) as mongoose.Model<any>;
 
 export default storyModel;

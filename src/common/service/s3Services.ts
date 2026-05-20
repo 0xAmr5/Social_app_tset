@@ -1,5 +1,5 @@
 import { Bucket$, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, GetObjectCommandInput, ListObjectsV2Command, ObjectCannedACL, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { AWS_ACCESS_KEY, APPLICATION_NAME, AWS_REGION, AWS_S3_BUCKET_NAME, AWS_SECRET_ACCESS_KEY } from "../../config/config.services.js";
+import { AWS_ACCESS_KEY, APPLICATION_NAME, AWS_REGION, AWS_S3_BUCKET_NAME, AWS_SECRET_ACCESS_KEY } from "../../config/config.service.js";
 import multerStorageEnum from "../enum/multerStorageType.js";
 import fs from 'node:fs'
 import { ErrorInteralServerError } from "../utils/global-error-handler.js";

@@ -1,9 +1,30 @@
 import { ErrorInteralServerError } from "../utils/global-error-handler";
 import { createClient, RedisArgument, RedisClientType } from "redis";
-import { string } from "zod";
-import { REDIS_CLIENT } from "../../config/config.services";
+import { REDIS_CLIENT } from "../../config/config.service";
+import cacheKeyEnum from "../enum/cacheKey.enum";
 
 class redisService {
+  otp_key({ email, subject }: { email: string; subject: string }) {
+    return this.cacheKey({ filter: email, subject });
+  }
+  async setValue({ key, value, ttl }: { key: string; value: string; ttl: number }) {
+    return await this.setKey({ key, value, ttl });
+  }
+  async getValue(key: string) {
+    return await this.getKey({ key });
+  }
+  async isExist(revokedTokenKey: string) {
+    return (await this.keyExists({ key: revokedTokenKey })) > 0;
+  }
+  async addFCM(userId: unknown, token: string) {
+    return await this.addSet({ filter: String(userId), subject: cacheKeyEnum.fcm }, token);
+  }
+  async getFCMS(userId: unknown) {
+    return await this.getSet({ filter: String(userId), subject: cacheKeyEnum.fcm });
+  }
+  async removeFCMUser(userId: unknown) {
+    return await this.deleteKey({ key: this.cacheKey({ filter: String(userId), subject: cacheKeyEnum.fcm }) });
+  }
   private readonly _client: RedisClientType;
   constructor() {
     this._client = createClient({
@@ -42,7 +63,7 @@ class redisService {
   }) {
     try {
       value =
-        (typeof value as any) == string
+        typeof value === "string"
           ? value
           : JSON.stringify(value, null, 2);
       return await this._client.set(key, value, { EX: ttl });
@@ -76,8 +97,9 @@ class redisService {
     }
   }
 
-  async deleteKey({ key }: { key: RedisArgument }) {
+  async deleteKey(input: { key: RedisArgument } | RedisArgument) {
     try {
+      const key = typeof input === "object" && "key" in input ? input.key : input;
       if ((!this.keyExists({ key }) as unknown as number) > 0) {
         return;
       }

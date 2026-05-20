@@ -37,3 +37,5 @@ export const validationMiddleWare = (schema: schemaType) => {
     next();
   };
 };
+
+export const Validation = validationMiddleWare;

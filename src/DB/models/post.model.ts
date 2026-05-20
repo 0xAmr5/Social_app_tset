@@ -62,6 +62,7 @@ postSchema.pre("findOneAndDelete", async function () {
   }
 });
 
-const postModel = mongoose.models.posts || mongoose.model("posts", postSchema);
+const postModel =
+  ((mongoose.models.posts as mongoose.Model<IPost> | undefined) || mongoose.model<IPost>("posts", postSchema)) as mongoose.Model<any>;
 
 export default postModel;

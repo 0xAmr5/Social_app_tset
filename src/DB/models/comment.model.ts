@@ -50,6 +50,8 @@ commentSchema.pre("findOneAndDelete", async function () {
   await this.model.deleteMany({ parentComment: comment._id });
 });
 
-const commentModel = mongoose.models.comments || mongoose.model<IComment>("comments", commentSchema);
+const commentModel =
+  ((mongoose.models.comments as mongoose.Model<IComment> | undefined) ||
+    mongoose.model<IComment>("comments", commentSchema)) as mongoose.Model<any>;
 
 export default commentModel;
